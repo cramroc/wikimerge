@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>{{ title }}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- Note: output/ -> ../static/... -->
+    <link rel="stylesheet" href="{{ css_href }}">
+  </head>
+  <body>
+    <main class="container">
+      <h1>{{ title }}</h1>
+      <div class="subtitle">Merged and translated via Wikimerge (MVP)</div>
+      <hr>
+
+      {# sections is a dict: section_title -> list of paragraph records #}
+      {% for section_title, paragraphs in sections.items() %}
+        <section class="section" id="{{ section_title|replace(' ', '_') }}">
+          {% if section_title != 'Lead' %}
+            <h2>{{ section_title }}</h2>
+          {% endif %}
+
+          {% for para in paragraphs %}
+            {# Each para is a record with fields: lang, original, translated, ... #}
+            <p>
+              <span class="lang-tag">[{{ para.lang }}]</span>
+              {{ para.translated }}
+            </p>
+          {% endfor %}
+        </section>
+      {% endfor %}
+    </main>
+  </body>
+</html>
