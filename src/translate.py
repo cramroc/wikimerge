@@ -119,10 +119,20 @@ def translate_paragraph(paragraph, src_lang, translator):
 
 # function to translate article
 def translate_article(article_dict, src_lang, translator):
+    # check inputs are valid types
+    if not isinstance(article_dict, dict):
+        raise ValueError("Article must be a dictionary of section -> list of paragraphs")
+
+    # translate section titles & make a mapping of old to new titles
+    section_names = list(article_dict.keys())
+    translated_section_names = translator.translate_batch(section_names, src_lang, "EN-GB")
+    section_map = dict(zip(section_names, translated_section_names)) # mapping original -> translated section names
+
     # prepare output with same section keys
     out = {}
     for section in article_dict.keys():
-        out[section] = []
+        translated_section = translator.translate_text(section, src_lang, "EN-GB")
+        out[translated_section] = []
     
     # build flat list
     flat_list = [] # {"section": "...", "idx": ..., "text": "..."}
@@ -152,13 +162,13 @@ def translate_article(article_dict, src_lang, translator):
         for item, translated in zip(batch, translated_texts):
             # create record
             record = {
-                "lang": "EN-GB",
-                "original": item["text"],
-                "translated": translated,
-                "idx": item["idx"]
+                "lang": src_lang.upper(), # source language code
+                "original": item["text"], # original text
+                "translated": translated, # translated text
+                "idx": item["idx"] # original index in section
             }
-            # append to correct section
-            out[item["section"]].append(record)
+            # append to correct section (need to use section map to get translated section name!)
+            out[section_map[item["section"]]].append(record)
         
         # move on to next batch
         pos += max_batch_size
