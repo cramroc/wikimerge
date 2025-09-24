@@ -14,13 +14,13 @@ def url_to_title(url):
     # make checks on parsed url
     ## scheme must be http(s)
     if p.scheme not in ("http", "https"):
-        raise ValueError()
+        raise ValueError("Scheme must be http or https")
     ## host must be "wikipedia.org" or a subdomain
     if not p.netloc.endswith("wikipedia.org"):
-        raise ValueError()
+        raise ValueError("Host must be wikipedia.org or a subdomain")
     ## path must begin with "/wiki/"
     if not p.path.startswith("/wiki/"):
-        raise ValueError()
+        raise ValueError("Path must begin with /wiki/")
 
     # acquire title from url
     ## handle trailing "/" and split segments by "/" (ignoring first empty segment)
