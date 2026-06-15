@@ -2,7 +2,7 @@
 from src.article import get_article, url_to_title
 from src.translate import translate_article, DeepLTranslator
 from src.merge import merge_articles
-from src.render_html import render_html
+from src.render import render_html
 
 # function: run_pipeline(config: dict) -> None
 def run_pipeline(config):
@@ -12,8 +12,10 @@ def run_pipeline(config):
         lang1
         url2
         lang2
-        title
-        outfile
+        title_out
+
+    Note: the output filename is currently hardcoded. Passing an empty
+    outfile to render_html falls back to its default path (output/merged_article.html).
     """
     # parse title from url
     title1 = url_to_title(config["url1"])
@@ -33,11 +35,11 @@ def run_pipeline(config):
     # merge articles
     merged = merge_articles(a1_trans, a2_trans)
 
-    # render html
-    render_html(config["title"], merged, config["outfile"])
-    
+    # render html (output filename is hardcoded via render's default path)
+    render_html(config["title_out"], merged, "")
+
     # print success message
-    print("Wrote " + config["outfile"])
+    print("Wrote merged article to the output/ folder")
 
     # return nothing
     return None
