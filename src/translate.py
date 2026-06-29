@@ -80,6 +80,8 @@ class DeepLTranslator:
             raise RuntimeError("Error connecting to DeepL API: " + str(e))
 
         # error handling
+        if response.status_code == 400 and "not supported" in response.text.lower():
+            raise ValueError("DeepL API error: Unsupported language code(s) " + source_lang + " or " + target_lang)
         if response.status_code != 200:
             raise RuntimeError("DeepL API error " + str(response.status_code) + ": " + response.text)
 
@@ -140,6 +142,8 @@ class DeepLTranslator:
                 raise RuntimeError("Error connecting to DeepL API: " + str(e))
 
             # error handling
+            if response.status_code == 400 and "not supported" in response.text.lower():
+                raise ValueError("DeepL API error: Unsupported language code(s) " + source_lang + " or " + target_lang)
             if response.status_code != 200:
                 raise RuntimeError("DeepL API error " + str(response.status_code) + ": " + response.text)
 
@@ -161,7 +165,10 @@ class DeepLTranslator:
     
     # normalise text code (from wikipediaapi format to DeepLTranslator format)
     def normalise_lang_code(self, lang:str):
-        return lang.upper()
+        code = lang.strip().upper() # strip whitespace and uppercase
+        if code == "SIMPLE": # simple english wikipedia -> treat as english for DeepL
+            return "EN"
+        return code
 
 
 # function to translate paragraph (use for testing)

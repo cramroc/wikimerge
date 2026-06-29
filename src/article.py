@@ -2,8 +2,8 @@
 import wikipediaapi
 from urllib.parse import urlparse, unquote
 
-# function: url_to_title(url: str) -> str
-def url_to_title(url):
+# function: url_check(url: str) -> None
+def url_check(url):
     # check url is a string and looks like url
     if not isinstance(url, str) or "://" not in url:
         raise ValueError("Expected a full Wikipedia article URL: http(s)://...")
@@ -22,6 +22,14 @@ def url_to_title(url):
     if not p.path.startswith("/wiki/"):
         raise ValueError("Path must begin with /wiki/")
 
+# function: url_to_title(url: str) -> str
+def url_to_title(url):
+    # check url is valid
+    url_check(url)
+
+    # parse url
+    p = urlparse(url)
+
     # acquire title from url
     ## handle trailing "/" and split segments by "/" (ignoring first empty segment)
     path = p.path.rstrip("/")
@@ -35,6 +43,23 @@ def url_to_title(url):
     title = title.replace("_", " ")
     ## return title
     return title
+
+# function: url_to_lang(url: str) -> str 
+def url_to_lang(url):
+    # check url is valid
+    url_check(url)
+
+    # parse url
+    parsed_url = urlparse(url)
+    
+    # edge cases
+    if parsed_url.netloc.startswith("www."):
+        raise ValueError("URL should not contain 'www.' prefix")
+    elif parsed_url.netloc.count('.') < 2:
+        raise ValueError("URL does not contain a valid subdomain for language code")
+    # return the first part of the netloc (subdomain) as the language code
+    lang_code = parsed_url.netloc.split('.')[0]
+    return lang_code.lower() # return in lowercase for for wikipedia-api
 
 # function: get_article(lang: str, title: str) -> dict[str, list[str]]
 def get_article(lang, title):
