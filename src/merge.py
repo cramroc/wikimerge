@@ -1,3 +1,34 @@
+import re
+
+DUPLICATE_THRESHOLD = 0.8 # threshold for considering two paragraphs as duplicates: if 80%+ words overlap, treat as duplicates
+
+def _jaccard(a, b):
+    """
+    Compute the Jaccard similarity between two strings.
+    Input:
+        a (str): first string
+        b (str): second string
+    Output:
+        float: Jaccard similarity (0.0 to 1.0)
+    """
+
+    # separate text into tokens
+    tokens_a = set(re.findall(r"[a-z0-9]+", a.lower()))
+    tokens_b = set(re.findall(r"[a-z0-9]+", b.lower()))
+
+    # get union of tokens
+    union = tokens_a.union(tokens_b)
+
+    # check if both sets are empty -> return 0.0 to avoid division by zero
+    if len(union) == 0:
+        return 0.0
+    
+    # compute intersection of tokens
+    intersection = tokens_a.intersection(tokens_b)
+
+    # compute and return Jaccard similarity
+    return len(intersection) / len(union)
+
 def merge_articles(a1: dict, a2: dict):
     """
     Merge two translated Wikipedia articles.
@@ -53,10 +84,17 @@ def merge_articles(a1: dict, a2: dict):
             else:
                 raise ValueError("Paragraph in section " + section + " in first argument is not a dictionary")
         for p in list2:
-            if isinstance(p, dict):
-                combined.append(dict(p))
-            else:
+            if not isinstance(p, dict):
                 raise ValueError("Paragraph in section " + section + " in second argument is not a dictionary")
+            # skip article 2 paragraphs that near-duplicate one already kept
+            p_candidate = p["translated"]
+            is_duplicate = False
+            for kept in combined:
+                if _jaccard(p_candidate, kept["translated"]) >= DUPLICATE_THRESHOLD:
+                    is_duplicate = True
+                    break
+            if not is_duplicate:
+                combined.append(dict(p))
         # assign paragraph list to merged dict
         merged[section] = combined
 
