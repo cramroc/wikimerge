@@ -13,9 +13,10 @@ def run_pipeline(config):
         url2
         lang2
         title_out
+        outfile (optional)
 
-    Note: the output filename is currently hardcoded. Passing an empty
-    outfile to render_html falls back to its default path (output/merged_article.html).
+    Note: outfile is derived from the title via _slugify in main.py. If absent
+    or empty, render_html falls back to its default path (output/merged_article.html).
     """
     # parse title from url
     title1 = url_to_title(config["url1"])
@@ -35,8 +36,8 @@ def run_pipeline(config):
     # merge articles
     merged = merge_articles(a1_trans, a2_trans)
 
-    # render html (output filename is hardcoded via render's default path)
-    render_html(config["title_out"], merged, "")
+    # render html (outfile derived from title; empty falls back to render's default path)
+    render_html(config["title_out"], merged, config.get("outfile", ""))
 
     # print success message
     print("Wrote merged article to the output/ folder")

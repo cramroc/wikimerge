@@ -1,5 +1,5 @@
 # imports
-import os, requests
+import os, json, hashlib, requests
 from dotenv import load_dotenv
 
 # Translator
@@ -13,7 +13,34 @@ class DeepLTranslator:
                 "DEEPL_API_KEY is missing. Add it to your .env file."
             )
         self.api_key = api_key # assign api key to translator
-    
+
+        # set up translation cache (avoids re-calling DeepL for text already translated)
+        self.cache_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)), "cache", "translations.json"
+        ) # project_root/cache/translations.json
+        self.cache = self._load_cache() # load existing cache (empty dict if none)
+
+    # build a unique cache key for a piece of text + its language pair
+    def _cache_key(self, text, source_lang, target_lang):
+        raw = source_lang + "|" + target_lang + "|" + text # combine so same text in different langs differ
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest() # short, stable key
+
+    # load the translation cache from disk (json file of key -> {original, translated})
+    def _load_cache(self):
+        if not os.path.exists(self.cache_path): # no cache file yet
+            return {}
+        try:
+            with open(self.cache_path, "r", encoding="utf-8") as f:
+                return json.load(f) # read json text back into a python dict
+        except (ValueError, OSError):
+            return {} # corrupt or unreadable -> start fresh, don't crash
+
+    # save the translation cache to disk as json
+    def save_cache(self):
+        os.makedirs(os.path.dirname(self.cache_path), exist_ok=True) # make sure cache/ folder exists
+        with open(self.cache_path, "w", encoding="utf-8") as f:
+            json.dump(self.cache, f, ensure_ascii=False, indent=2) # write dict out as readable json
+
     # translate text
     def translate_text(self, text: str, source_lang: str, target_lang: str):
         # check text is not empty
@@ -29,6 +56,11 @@ class DeepLTranslator:
         # normalise language codes
         source_lang = self.normalise_lang_code(source_lang)
         target_lang = self.normalise_lang_code(target_lang)
+
+        # check cache first (skip the API if we already translated this exact text)
+        key = self._cache_key(text, source_lang, target_lang)
+        if key in self.cache:
+            return self.cache[key]["translated"] # cache hit -> return saved translation
 
         # choose DeepL endpoint (for now it is free)
         endpoint = "https://api-free.deepl.com/v2/translate"
@@ -46,15 +78,16 @@ class DeepLTranslator:
             response = requests.post(endpoint, data=data)
         except requests.RequestException as e:
             raise RuntimeError("Error connecting to DeepL API: " + str(e))
-        
+
         # error handling
         if response.status_code != 200:
             raise RuntimeError("DeepL API error " + str(response.status_code) + ": " + response.text)
-        
+
         # parse response & return translated text as string
         try:
             data = response.json()
             translated_text = data["translations"][0]["text"]
+            self.cache[key] = {"original": text, "translated": translated_text} # save to cache for next time
             return translated_text
         except ValueError:
             # JSON decoding error
@@ -70,42 +103,61 @@ class DeepLTranslator:
         
         # convert None to empty string and ensure all are strings
         texts = [("" if t is None else str(t)) for t in texts]
-        
+
         # normalise language codes
         source_lang = self.normalise_lang_code(source_lang)
         target_lang = self.normalise_lang_code(target_lang)
 
-        # choose DeepL endpoint (for now it is free)
-        endpoint = "https://api-free.deepl.com/v2/translate"
+        # split texts into cache hits (already translated) and misses (need the API)
+        keys = [self._cache_key(t, source_lang, target_lang) for t in texts] # one key per text
+        results = [None] * len(texts) # final translations, filled by position
+        missing_indices = [] # positions whose text is not cached yet
+        missing_texts = [] # the actual texts we still need to send to DeepL
+        for i, key in enumerate(keys):
+            if key in self.cache:
+                results[i] = self.cache[key]["translated"] # cache hit -> reuse saved translation
+            else:
+                missing_indices.append(i) # remember where this text belongs
+                missing_texts.append(texts[i])
 
-        # build request data
-        data = {
-            "auth_key": self.api_key,
-            "text": texts,
-            "source_lang": source_lang,
-            "target_lang": target_lang,
-        }
+        # only call DeepL if at least one text is uncached
+        if missing_texts:
+            # choose DeepL endpoint (for now it is free)
+            endpoint = "https://api-free.deepl.com/v2/translate"
 
-        # send request
-        try:
-            response = requests.post(endpoint, data=data)
-        except requests.RequestException as e:
-            raise RuntimeError("Error connecting to DeepL API: " + str(e))
-        
-        # error handling
-        if response.status_code != 200:
-            raise RuntimeError("DeepL API error " + str(response.status_code) + ": " + response.text)
-        
-        # parse response
-        try:
-            data = response.json()
-            translated_texts = [t["text"] for t in data["translations"]]
-        except ValueError:
-            # JSON decoding error
-            raise RuntimeError("Error decoding DeepL API response")
-        
+            # build request data (only the uncached texts)
+            data = {
+                "auth_key": self.api_key,
+                "text": missing_texts,
+                "source_lang": source_lang,
+                "target_lang": target_lang,
+            }
+
+            # send request
+            try:
+                response = requests.post(endpoint, data=data)
+            except requests.RequestException as e:
+                raise RuntimeError("Error connecting to DeepL API: " + str(e))
+
+            # error handling
+            if response.status_code != 200:
+                raise RuntimeError("DeepL API error " + str(response.status_code) + ": " + response.text)
+
+            # parse response
+            try:
+                data = response.json()
+                translated_texts = [t["text"] for t in data["translations"]]
+            except ValueError:
+                # JSON decoding error
+                raise RuntimeError("Error decoding DeepL API response")
+
+            # slot each new translation back into its original position + save to cache
+            for idx, translated in zip(missing_indices, translated_texts):
+                results[idx] = translated
+                self.cache[keys[idx]] = {"original": texts[idx], "translated": translated}
+
         # return list of translated strings in the same order
-        return translated_texts
+        return results
     
     # normalise text code (from wikipediaapi format to DeepLTranslator format)
     def normalise_lang_code(self, lang:str):
@@ -128,11 +180,8 @@ def translate_article(article_dict, src_lang, translator):
     translated_section_names = translator.translate_batch(section_names, src_lang, "EN-GB")
     section_map = dict(zip(section_names, translated_section_names)) # mapping original -> translated section names
 
-    # prepare output with same section keys
-    out = {}
-    for section in article_dict.keys():
-        translated_section = translator.translate_text(section, src_lang, "EN-GB")
-        out[translated_section] = []
+    # prepare output with translated section keys (from section_map, so keys match the append loop below)
+    out = {translated: [] for translated in section_map.values()}
     
     # build flat list
     flat_list = [] # {"section": "...", "idx": ..., "text": "..."}
@@ -142,6 +191,7 @@ def translate_article(article_dict, src_lang, translator):
     
     # if flat_list is empty, return empty output
     if not flat_list:
+        translator.save_cache() # persist any section-title translations done above
         return out
     
     # chunk flat list into batches of 50 (DeepL free tier limit is 50 texts per request)
@@ -172,6 +222,9 @@ def translate_article(article_dict, src_lang, translator):
         
         # move on to next batch
         pos += max_batch_size
+
+    # persist cache so future runs can reuse these translations
+    translator.save_cache()
 
     # return translated article as dict[str, list[{"lang": "...", "original": "...", "translated": "..."}]]
     return out

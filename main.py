@@ -1,10 +1,11 @@
-import sys
+import sys, re
 from src.pipeline import run_pipeline
 
 # helper function to slugify text (to transform title to output filename)
 def _slugify(text, max_length=50):
-    s = (text or "").strip
-    return text.lower().replace(" ", "-")
+    s = (text or "").strip().lower() # strip and lowercase
+    s = re.sub(r"[^a-z0-9]+", "-", s).strip("-") # non-alphanumerics to hyphens, trim stray hyphens
+    return s[:max_length] or "merged_article" # cap length, fallback if empty
 
 # helper function to valdate language code
 
@@ -18,13 +19,13 @@ def prompt_user():
     url2 = input("Enter article URL 2: ").strip()
     lang2 = input("Enter article language code 2 (e.g. 'es', 'fr'): ").strip()
     title_out = input("Enter output article title: ").strip()
-    # outfile = input("Enter output HTML file name (without .html extension): ").strip() + ".html"
     return {
         "url1": url1,
         "lang1": lang1,
         "url2": url2,
         "lang2": lang2,
-        "title_out": title_out
+        "title_out": title_out,
+        "outfile": _slugify(title_out) + ".html" # derive filename from title (e.g. "Giant Tortoise" -> giant-tortoise.html)
     }
 
 def main():
