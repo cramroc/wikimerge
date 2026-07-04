@@ -25,8 +25,8 @@ def resolve_output_path(outfile):
     filename = os.path.basename(outfile)
     return os.path.join(OUTPUT_DIR, filename)
 
-# function: render_html(title: str, sections: dict, outfile: str) -> None
-def render_html(title, sections, outfile):
+# function: render_html(title, sections, outfile, analysis=None, lang1="", lang2="") -> None
+def render_html(title, sections, outfile, analysis=None, lang1="", lang2=""):
     # prepare jinja environment
     env = Environment(
         loader=FileSystemLoader(TEMPLATES_DIR),
@@ -50,7 +50,10 @@ def render_html(title, sections, outfile):
     html = template.render(
         title=title,
         sections=sections,
-        css_href=css_path
+        css_href=css_path,
+        analysis=analysis,
+        lang1=lang1,
+        lang2=lang2
     )
     
     # write to outfile

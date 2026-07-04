@@ -20,6 +20,27 @@
             <h2>{{ section_title }}</h2>
           {% endif %}
 
+          {# per-section cross-edition analysis summary (agree / unique-per-language) #}
+          {% if analysis and section_title in analysis %}
+            {% set info = analysis[section_title] %}
+            <div class="insight" style="border-left:3px solid #a2a9b1;background:#f8f9fa;padding:8px 12px;margin:8px 0;font-size:0.9em;">
+              <strong>Cross-edition analysis:</strong>
+              {{ info.agree|length }} shared,
+              {{ info.unique_a1|length }} only in {{ lang1 }},
+              {{ info.unique_a2|length }} only in {{ lang2 }}.
+              {% if info.unique_a1 %}
+                <div><em>Only in {{ lang1 }}:</em>
+                  <ul>{% for r in info.unique_a1 %}<li>{{ r.translated }}</li>{% endfor %}</ul>
+                </div>
+              {% endif %}
+              {% if info.unique_a2 %}
+                <div><em>Only in {{ lang2 }}:</em>
+                  <ul>{% for r in info.unique_a2 %}<li>{{ r.translated }}</li>{% endfor %}</ul>
+                </div>
+              {% endif %}
+            </div>
+          {% endif %}
+
           {% for para in paragraphs %}
             {# Each para is a record with fields: lang, original, translated, ... #}
             <p>

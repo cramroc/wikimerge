@@ -1,6 +1,7 @@
 import re
 
 DUPLICATE_THRESHOLD = 0.8 # threshold for considering two paragraphs as duplicates: if 80%+ words overlap, treat as duplicates
+SECTION_MATCH_THRESHOLD = 0.4 # threshold for treating two section titles as the same section (title word overlap)
 
 def _jaccard(a, b):
     """
@@ -22,12 +23,123 @@ def _jaccard(a, b):
     # check if both sets are empty -> return 0.0 to avoid division by zero
     if len(union) == 0:
         return 0.0
-    
+
     # compute intersection of tokens
     intersection = tokens_a.intersection(tokens_b)
 
     # compute and return Jaccard similarity
     return len(intersection) / len(union)
+
+def _best_section_match(title, candidate_titles, used):
+    """
+    Find the candidate section title most similar to `title` (by Jaccard on titles).
+    Input:
+        title (str): the section title we want to match
+        candidate_titles (list[str]): possible section titles to match against
+        used (set): candidate titles already matched (skipped, each used once)
+    Output:
+        str or None: best-matching title if it clears SECTION_MATCH_THRESHOLD, else None
+    """
+
+    # track the best candidate found so far
+    best_title = None
+    best_score = 0.0
+
+    # compare against every candidate not already matched
+    for cand in candidate_titles:
+        if cand in used: # each a1 section can only be matched once
+            continue
+        score = _jaccard(title, cand)
+        if score > best_score:
+            best_score = score
+            best_title = cand
+
+    # only count it as a match if the best score clears the threshold
+    if best_score >= SECTION_MATCH_THRESHOLD:
+        return best_title
+    return None
+
+def _merge_paragraph_lists(list1, list2, section_label):
+    """
+    Merge two lists of paragraph records from the same (aligned) section:
+    keep all of list1, then add list2 paragraphs that are not near-duplicates.
+    Input:
+        list1 (list[dict]): paragraph records from article 1
+        list2 (list[dict]): paragraph records from article 2
+        section_label (str): section name (used only in error messages)
+    Output:
+        list[dict]: combined paragraph records
+    """
+
+    # ensure both are lists
+    if not isinstance(list1, list):
+        raise ValueError("Section " + section_label + " in first argument is not a list")
+    if not isinstance(list2, list):
+        raise ValueError("Section " + section_label + " in second argument is not a list")
+
+    # keep all of article 1's paragraphs (shallow-copied so inputs are not mutated)
+    combined = []
+    for p in list1:
+        if isinstance(p, dict):
+            combined.append(dict(p))
+        else:
+            raise ValueError("Paragraph in section " + section_label + " in first argument is not a dictionary")
+
+    # add article 2's paragraphs only if not a near-duplicate of one already kept
+    for p in list2:
+        if not isinstance(p, dict):
+            raise ValueError("Paragraph in section " + section_label + " in second argument is not a dictionary")
+        # skip article 2 paragraphs that near-duplicate one already kept
+        p_candidate = p["translated"]
+        is_duplicate = False
+        for kept in combined:
+            if _jaccard(p_candidate, kept["translated"]) >= DUPLICATE_THRESHOLD:
+                is_duplicate = True
+                break
+        if not is_duplicate:
+            combined.append(dict(p))
+
+    # return merged paragraph list
+    return combined
+
+def pair_sections(a1, a2):
+    """
+    Pair up sections across two articles by title similarity (shared by merge and analysis).
+    Input:
+        a1, a2 (dict): articles (section -> list of paragraph records)
+    Output:
+        list of (title, a1_key, a2_key): pairing in output order -- Lead first, then each
+        article-1 section with the article-2 section that matched it, then unmatched a2
+        sections; a1_key / a2_key is the section name in that article, or None if absent
+    """
+    # non-Lead section titles for each article (Lead is handled on its own)
+    a1_sections = [s for s in a1.keys() if s != "Lead"]
+    a2_sections = [s for s in a2.keys() if s != "Lead"]
+
+    # match each article-2 section to its most similar article-1 section (each a1 used once)
+    a2_to_a1 = {} # maps an a2 section title -> the a1 section it pairs with (or None)
+    claimed_a1 = set()
+    for a2_sec in a2_sections:
+        match = _best_section_match(a2_sec, a1_sections, claimed_a1)
+        a2_to_a1[a2_sec] = match
+        if match is not None:
+            claimed_a1.add(match)
+
+    # build the ordered pairing
+    pairs = []
+    if "Lead" in a1 or "Lead" in a2:
+        pairs.append(("Lead", "Lead" if "Lead" in a1 else None, "Lead" if "Lead" in a2 else None))
+    for a1_sec in a1_sections:
+        matched_a2 = None
+        for a2_sec, target in a2_to_a1.items():
+            if target == a1_sec:
+                matched_a2 = a2_sec
+                break
+        pairs.append((a1_sec, a1_sec, matched_a2))
+    for a2_sec in a2_sections:
+        if a2_to_a1[a2_sec] is None:
+            pairs.append((a2_sec, None, a2_sec))
+    return pairs
 
 def merge_articles(a1: dict, a2: dict):
     """
@@ -37,8 +149,10 @@ def merge_articles(a1: dict, a2: dict):
         a2 (dict): translated_article from language 2
     Output:
         dict: merged sections -> list of paragraph records
-              (order rule: all sections from a1 first, then any new sections from a2;
-               within a section: paragraphs from a1 first, then a2)
+              (order: Lead first, then article 1's sections (each enriched with the
+               article 2 section that matched it by title similarity), then any
+               article 2 sections that matched nothing;
+               within a section: paragraphs from a1 first, then a2's non-duplicates)
     """
 
     # ensure both input are not empty
@@ -50,79 +164,39 @@ def merge_articles(a1: dict, a2: dict):
     if not isinstance(a2, dict):
         raise ValueError("Second argument is not a dictionary")
 
-    # instantiate list of section titles in order
-    sec_titles_in_order = []
-    # add "Lead" first if present in either dictionary
-    if "Lead" in a1 or "Lead" in a2:
-        sec_titles_in_order.append("Lead")
-    # add other sections from a1 and a2 in order of appearance
-    for sec in a1.keys():
-        if sec != "Lead" and sec not in sec_titles_in_order:
-            sec_titles_in_order.append(sec)
-    for sec in a2.keys():
-        if sec != "Lead" and sec not in sec_titles_in_order:
-            sec_titles_in_order.append(sec)
-
-    # initialise empty dict and fill it section by section.
+    # pair sections across the two articles, then merge each pair's paragraph lists
     merged = {}
-
-    # loop through sec_titles_in_order:
-    for section in sec_titles_in_order:
-        # get list of paragaph records from a1 & a2
-        list1 = a1.get(section, [])
-        list2 = a2.get(section, [])
-        # ensure both are lists
-        if not isinstance(list1, list):
-            raise ValueError("Section " + section + " in first argument is not a list")
-        if not isinstance(list2, list):
-            raise ValueError("Section " + section + " in second argument is not a list")
-        # Shallow-copy each paragraph records (so later modifications to inputs do not affect merged output)
-        combined = []
-        for p in list1:
-            if isinstance(p, dict):
-                combined.append(dict(p))
-            else:
-                raise ValueError("Paragraph in section " + section + " in first argument is not a dictionary")
-        for p in list2:
-            if not isinstance(p, dict):
-                raise ValueError("Paragraph in section " + section + " in second argument is not a dictionary")
-            # skip article 2 paragraphs that near-duplicate one already kept
-            p_candidate = p["translated"]
-            is_duplicate = False
-            for kept in combined:
-                if _jaccard(p_candidate, kept["translated"]) >= DUPLICATE_THRESHOLD:
-                    is_duplicate = True
-                    break
-            if not is_duplicate:
-                combined.append(dict(p))
-        # assign paragraph list to merged dict
-        merged[section] = combined
+    for title, a1_key, a2_key in pair_sections(a1, a2):
+        list1 = a1.get(a1_key, []) if a1_key else []
+        list2 = a2.get(a2_key, []) if a2_key else []
+        merged[title] = _merge_paragraph_lists(list1, list2, title)
 
     # return merged dict: dict[str, list[dict[str, str]]]
     return merged
 
 if __name__ == "__main__":
-    # test data
+    # test data (section titles already translated to English, as in the real pipeline)
     a1 = {
         "Lead": [
-            {"lang": "ES", "original": "Hola mundo.", "translated": "Hello world.", "idx": 0},
-            {"lang": "ES", "original": "Esto es una prueba.", "translated": "This is a test.", "idx": 1}
+            {"lang": "ES", "original": "París es la capital de Francia.", "translated": "Paris is the capital of France.", "idx": 0}
         ],
-        "Historia": [
-            {"lang": "ES", "original": "La historia es larga.", "translated": "The history is long.", "idx": 0},
-            {"lang": "ES", "original": "Muchos cosas pasaron.", "translated": "Many things happened.", "idx": 1}
+        "History": [
+            {"lang": "ES", "original": "Fue fundada en la antigüedad.", "translated": "The city was founded in ancient times.", "idx": 0}
         ]
     }
-    
+
     a2 = {
         "Lead": [
-            {"lang": "FR", "original": "Bonjour monde.", "translated": "Hello world.", "idx": 0}
+            # near-duplicate of a1's Lead -> should be deduped away
+            {"lang": "FR", "original": "Paris est la capitale de la France.", "translated": "Paris is the capital of France.", "idx": 0}
         ],
-        "Géographie": [
-            {"lang": "FR", "original": "La géographie est vaste.", "translated": "Geography is vast.", "idx": 0}
+        "Early history": [
+            # different title, should align with a1's "History"
+            {"lang": "FR", "original": "Elle possède de nombreux musées.", "translated": "It also has many museums.", "idx": 0}
         ],
-        "Historia": [
-            {"lang": "FR", "original": "L'histoire est intéressante.", "translated": "History is interesting.", "idx": 0}
+        "Geography": [
+            # no matching a1 section -> kept on its own
+            {"lang": "FR", "original": "Paris est sur la Seine.", "translated": "Paris sits on the Seine river.", "idx": 0}
         ]
     }
 
@@ -133,4 +207,4 @@ if __name__ == "__main__":
     for section, paragraphs in merged.items():
         print("Section: " + section)
         for record in paragraphs:
-            print(" -", record)
+            print(" -", record["translated"])

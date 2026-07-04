@@ -87,6 +87,16 @@ def get_article(lang, title):
         # return list of clean paragraphs
         return paragraphs
 
+    # helper function: collect_paragraphs(section) -> list[str]
+    # gather a section's own paragraphs AND all its subsections' (flattened, in reading order)
+    def collect_paragraphs(section):
+        # this section's own prose first
+        paragraphs = split_paragraphs(section.text)
+        # then recurse into each subsection (any depth) and append its paragraphs
+        for sub in section.sections:
+            paragraphs.extend(collect_paragraphs(sub))
+        return paragraphs
+
     # build result dictionary
     ## initiate dict
     out = {}
@@ -94,12 +104,12 @@ def get_article(lang, title):
     lead_text = split_paragraphs(page.summary)
     if lead_text:
         out["Lead"] = lead_text
-    ## sections
+    ## sections (each top-level section flattens in all of its subsection prose)
     for s in page.sections:
-        section_text = split_paragraphs(s.text)
+        section_text = collect_paragraphs(s)
         if section_text:
             out[s.title] = section_text
-    
+
     # return result dictionary of section title & list of paragraphs in section
     return out
 
