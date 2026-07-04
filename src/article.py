@@ -64,7 +64,7 @@ def url_to_lang(url):
 # function: get_article(lang: str, title: str) -> dict[str, list[str]]
 def get_article(lang, title):
     # instantiate wikipedia api
-    wiki = wikipediaapi.Wikipedia(user_agent="Wikimerge/0.1",
+    wiki = wikipediaapi.Wikipedia(user_agent="Wikimerge/0.1 (https://github.com/cramroc/wikimerge)",
                                   language=lang,
                                   extract_format=wikipediaapi.ExtractFormat.WIKI)
     

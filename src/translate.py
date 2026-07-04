@@ -67,15 +67,17 @@ class DeepLTranslator:
 
         # build request data
         data = {
-            "auth_key": self.api_key,
             "text": text,
             "source_lang": source_lang,
             "target_lang": target_lang,
         }
 
+        # authenticate via header (DeepL no longer accepts auth_key in the body)
+        headers = {"Authorization": "DeepL-Auth-Key " + self.api_key}
+
         # send request
         try:
-            response = requests.post(endpoint, data=data)
+            response = requests.post(endpoint, data=data, headers=headers)
         except requests.RequestException as e:
             raise RuntimeError("Error connecting to DeepL API: " + str(e))
 
@@ -129,15 +131,17 @@ class DeepLTranslator:
 
             # build request data (only the uncached texts)
             data = {
-                "auth_key": self.api_key,
                 "text": missing_texts,
                 "source_lang": source_lang,
                 "target_lang": target_lang,
             }
 
+            # authenticate via header (DeepL no longer accepts auth_key in the body)
+            headers = {"Authorization": "DeepL-Auth-Key " + self.api_key}
+
             # send request
             try:
-                response = requests.post(endpoint, data=data)
+                response = requests.post(endpoint, data=data, headers=headers)
             except requests.RequestException as e:
                 raise RuntimeError("Error connecting to DeepL API: " + str(e))
 
