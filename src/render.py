@@ -25,8 +25,8 @@ def resolve_output_path(outfile):
     filename = os.path.basename(outfile)
     return os.path.join(OUTPUT_DIR, filename)
 
-# function: render_html(title, sections, outfile, analysis=None, lang1="", lang2="") -> None
-def render_html(title, sections, outfile, analysis=None, lang1="", lang2=""):
+# function: render_html(title, analysis, outfile, lang1="", lang2="") -> None
+def render_html(title, analysis, outfile, lang1="", lang2=""):
     # prepare jinja environment
     env = Environment(
         loader=FileSystemLoader(TEMPLATES_DIR),
@@ -49,9 +49,8 @@ def render_html(title, sections, outfile, analysis=None, lang1="", lang2=""):
     # render html
     html = template.render(
         title=title,
-        sections=sections,
-        css_href=css_path,
         analysis=analysis,
+        css_href=css_path,
         lang1=lang1,
         lang2=lang2
     )
@@ -62,20 +61,29 @@ def render_html(title, sections, outfile, analysis=None, lang1="", lang2=""):
 
 # testing
 if __name__ == "__main__":
-    demo_sections = {
-        "Lead": [
-            {"lang": "ES", "translated": "Hello world translated from Spanish."},
-            {"lang": "FR", "translated": "Hello world translated from French."},
-        ],
-        "History": [
-            {"lang": "ES", "translated": "History from Spanish."},
-            {"lang": "FR", "translated": "History from French."},
-        ]
+    # analysis-shaped demo: one shared point (both editions) + one unique per edition
+    demo_analysis = {
+        "Lead": {
+            "agree": [{
+                "a1": {"lang": "ES", "translated": "Paris is the capital of France."},
+                "a2": {"lang": "FR", "translated": "Paris is the capital city of France."},
+                "score": 0.95
+            }],
+            "unique_a1": [],
+            "unique_a2": []
+        },
+        "History": {
+            "agree": [],
+            "unique_a1": [{"lang": "ES", "translated": "Founded in ancient times (from Spanish)."}],
+            "unique_a2": [{"lang": "FR", "translated": "It also has many museums (from French)."}]
+        }
     }
-    
+
     render_html(
         title="Example Article (Merged)",
-        sections=demo_sections,
-        outfile="output/merged_article.html"
+        analysis=demo_analysis,
+        outfile="output/merged_article.html",
+        lang1="ES",
+        lang2="FR"
     )
     print("Wrote output/merged_article.html")

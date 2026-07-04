@@ -1,8 +1,12 @@
-import re
+# import re  # PARKED: only used by the parked _jaccard below
+from src import similarity
 
-DUPLICATE_THRESHOLD = 0.8 # threshold for considering two paragraphs as duplicates: if 80%+ words overlap, treat as duplicates
-SECTION_MATCH_THRESHOLD = 0.4 # threshold for treating two section titles as the same section (title word overlap)
+# DUPLICATE_THRESHOLD = 0.8  # PARKED: only used by the parked paragraph dedup below
+SECTION_MATCH_THRESHOLD = 0.5 # cosine threshold for treating two section titles as the same section (embedding similarity; tune on real runs)
 
+# ---- PARKED: unused since the merge was replaced by analysis-driven rendering ----
+# ---- (kept as an inert string in case the flat-merge path is ever restored) ----
+'''
 def _jaccard(a, b):
     """
     Compute the Jaccard similarity between two strings.
@@ -29,10 +33,11 @@ def _jaccard(a, b):
 
     # compute and return Jaccard similarity
     return len(intersection) / len(union)
+'''
 
 def _best_section_match(title, candidate_titles, used):
     """
-    Find the candidate section title most similar to `title` (by Jaccard on titles).
+    Find the candidate section title most similar to `title` (by embedding cosine).
     Input:
         title (str): the section title we want to match
         candidate_titles (list[str]): possible section titles to match against
@@ -41,24 +46,22 @@ def _best_section_match(title, candidate_titles, used):
         str or None: best-matching title if it clears SECTION_MATCH_THRESHOLD, else None
     """
 
-    # track the best candidate found so far
-    best_title = None
-    best_score = 0.0
+    # only consider candidates not already matched (each a1 section used once)
+    available = [c for c in candidate_titles if c not in used]
+    if not available:
+        return None
 
-    # compare against every candidate not already matched
-    for cand in candidate_titles:
-        if cand in used: # each a1 section can only be matched once
-            continue
-        score = _jaccard(title, cand)
-        if score > best_score:
-            best_score = score
-            best_title = cand
+    # cosine similarity of this title against each available candidate title
+    scores = similarity.similarity_matrix([title], available)[0]
 
-    # only count it as a match if the best score clears the threshold
-    if best_score >= SECTION_MATCH_THRESHOLD:
-        return best_title
+    # pick the best-scoring candidate; only count it if it clears the threshold
+    best = int(scores.argmax())
+    if float(scores[best]) >= SECTION_MATCH_THRESHOLD:
+        return available[best]
     return None
 
+# ---- PARKED: paragraph dedup, unused since we now keep both editions and group them ----
+'''
 def _merge_paragraph_lists(list1, list2, section_label):
     """
     Merge two lists of paragraph records from the same (aligned) section:
@@ -101,6 +104,7 @@ def _merge_paragraph_lists(list1, list2, section_label):
 
     # return merged paragraph list
     return combined
+'''
 
 def pair_sections(a1, a2):
     """
@@ -141,6 +145,8 @@ def pair_sections(a1, a2):
             pairs.append((a2_sec, None, a2_sec))
     return pairs
 
+# ---- PARKED: flat merge + its __main__ test, replaced by analysis-driven rendering ----
+'''
 def merge_articles(a1: dict, a2: dict):
     """
     Merge two translated Wikipedia articles.
@@ -208,3 +214,4 @@ if __name__ == "__main__":
         print("Section: " + section)
         for record in paragraphs:
             print(" -", record["translated"])
+'''

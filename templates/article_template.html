@@ -13,40 +13,35 @@
       <div class="subtitle">Merged and translated via Wikimerge (MVP)</div>
       <hr>
 
-      {# sections is a dict: section_title -> list of paragraph records #}
-      {% for section_title, paragraphs in sections.items() %}
+      {# analysis is an ordered dict: section_title -> {agree, unique_a1, unique_a2} #}
+      {% for section_title, info in analysis.items() %}
         <section class="section" id="{{ section_title|replace(' ', '_') }}">
           {% if section_title != 'Lead' %}
             <h2>{{ section_title }}</h2>
           {% endif %}
 
-          {# per-section cross-edition analysis summary (agree / unique-per-language) #}
-          {% if analysis and section_title in analysis %}
-            {% set info = analysis[section_title] %}
-            <div class="insight" style="border-left:3px solid #a2a9b1;background:#f8f9fa;padding:8px 12px;margin:8px 0;font-size:0.9em;">
-              <strong>Cross-edition analysis:</strong>
-              {{ info.agree|length }} shared,
-              {{ info.unique_a1|length }} only in {{ lang1 }},
-              {{ info.unique_a2|length }} only in {{ lang2 }}.
-              {% if info.unique_a1 %}
-                <div><em>Only in {{ lang1 }}:</em>
-                  <ul>{% for r in info.unique_a1 %}<li>{{ r.translated }}</li>{% endfor %}</ul>
-                </div>
-              {% endif %}
-              {% if info.unique_a2 %}
-                <div><em>Only in {{ lang2 }}:</em>
-                  <ul>{% for r in info.unique_a2 %}<li>{{ r.translated }}</li>{% endfor %}</ul>
-                </div>
-              {% endif %}
-            </div>
-          {% endif %}
+          {# small per-section count line #}
+          <div class="counts" style="color:#54595d;font-size:0.85em;margin:4px 0;">
+            {{ info.agree|length }} shared &middot;
+            {{ info.unique_a1|length }} only in {{ lang1 }} &middot;
+            {{ info.unique_a2|length }} only in {{ lang2 }}
+          </div>
 
-          {% for para in paragraphs %}
-            {# Each para is a record with fields: lang, original, translated, ... #}
-            <p>
-              <span class="lang-tag">[{{ para.lang }}]</span>
-              {{ para.translated }}
-            </p>
+          {# shared points: both editions grouped together so it's clear they say the same thing #}
+          {% for pair in info.agree %}
+            <div class="shared" style="border-left:3px solid #3366cc;background:#f6f9ff;padding:8px 12px;margin:8px 0;">
+              <div style="font-size:0.8em;color:#3366cc;font-weight:bold;">Both editions:</div>
+              <p><span class="lang-tag">[{{ pair.a1.lang }}]</span> {{ pair.a1.translated }}</p>
+              <p><span class="lang-tag">[{{ pair.a2.lang }}]</span> {{ pair.a2.translated }}</p>
+            </div>
+          {% endfor %}
+
+          {# content only one edition has #}
+          {% for rec in info.unique_a1 %}
+            <p><span class="lang-tag">[{{ rec.lang }}]</span> {{ rec.translated }}</p>
+          {% endfor %}
+          {% for rec in info.unique_a2 %}
+            <p><span class="lang-tag">[{{ rec.lang }}]</span> {{ rec.translated }}</p>
           {% endfor %}
         </section>
       {% endfor %}

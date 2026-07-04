@@ -1,7 +1,6 @@
 
 from src.article import get_article, url_to_title, url_to_lang
 from src.translate import translate_article, DeepLTranslator
-from src.merge import merge_articles
 from src.analysis import analyze_articles
 from src.render import render_html
 
@@ -34,15 +33,12 @@ def run_pipeline(config):
     a1_trans = translate_article(a1_orig, lang1, translator)
     a2_trans = translate_article(a2_orig, lang2, translator)
 
-    # merge articles
-    merged = merge_articles(a1_trans, a2_trans)
-
-    # analyse the two articles (agree / unique-per-language) on the PRE-merge translated
-    # articles, so dedup hasn't yet removed the overlapping paragraphs we want to find
+    # analyse the two articles: per section, what they share vs. what each covers
+    # uniquely. this analysis IS the body now (no separate flat merge step)
     analysis = analyze_articles(a1_trans, a2_trans)
 
     # render html (outfile derived from title; empty falls back to render's default path)
-    render_html(config["title_out"], merged, config.get("outfile", ""), analysis, lang1, lang2)
+    render_html(config["title_out"], analysis, config.get("outfile", ""), lang1, lang2)
 
     # print success message
     print("Wrote merged article to the output/ folder")

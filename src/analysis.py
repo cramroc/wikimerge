@@ -1,56 +1,8 @@
 # imports
-from sentence_transformers import SentenceTransformer, util
-from src.merge import _best_section_match
+from src import similarity
+from src.merge import pair_sections
 
-EMBED_MODEL = "all-MiniLM-L6-v2" # embedding model for symmetric semantic similarity (for now: small, fast, CPU-friendly)
 AGREE_THRESHOLD = 0.5 # cosine threshold above which two paragraphs are treated as the same point ("agree" candidate)
-
-# lazy method so model is loaded once and reused (loading takes a few seconds)
-_model = None
-def _get_model():
-    global _model
-    if _model is None:
-        _model = SentenceTransformer(EMBED_MODEL)
-    return _model
-
-# pair sections across the two articles by title similarity (reuses matcher from merge.py)
-def _pair_sections(a1, a2):
-    """
-    Pair up sections across two articles.
-    Input:
-        a1, a2 (dict): translated articles (section -> list of paragraph records)
-    Output:
-        list of (title, a1_key, a2_key): section pairing in output order, where
-        a1_key / a2_key is the section name in each article (or None if absent)
-    """
-    # non-Lead section titles for each article (Lead is handled separately)
-    a1_sections = [s for s in a1 if s != "Lead"]
-    a2_sections = [s for s in a2 if s != "Lead"]
-
-    # match each a2 section to its most similar a1 section (each a1 used at most once)
-    a2_to_a1 = {}
-    claimed = set()
-    for a2_sec in a2_sections:
-        match = _best_section_match(a2_sec, a1_sections, claimed)
-        a2_to_a1[a2_sec] = match
-        if match is not None:
-            claimed.add(match)
-
-    # build ordered pairing: Lead, then a1 sections (with their match), then unmatched a2 sections
-    pairs = []
-    if "Lead" in a1 or "Lead" in a2:
-        pairs.append(("Lead", "Lead" if "Lead" in a1 else None, "Lead" if "Lead" in a2 else None))
-    for a1_sec in a1_sections:
-        matched_a2 = None
-        for a2_sec, target in a2_to_a1.items():
-            if target == a1_sec:
-                matched_a2 = a2_sec
-                break
-        pairs.append((a1_sec, a1_sec, matched_a2))
-    for a2_sec in a2_sections:
-        if a2_to_a1[a2_sec] is None:
-            pairs.append((a2_sec, None, a2_sec))
-    return pairs
 
 # analyse a single (aligned) section: which paragraphs agree, which are unique to each article
 def _analyse_section(list1, list2):
@@ -66,13 +18,11 @@ def _analyse_section(list1, list2):
     if not list2:
         return {"agree": [], "unique_a1": list(list1), "unique_a2": []}
 
-    # embed the english (translated) text of each paragraph
-    model = _get_model()
-    emb1 = model.encode([r["translated"] for r in list1])
-    emb2 = model.encode([r["translated"] for r in list2])
-
-    # cross-article cosine similarity matrix
-    sim = util.cos_sim(emb1, emb2)
+    # cross-article cosine similarity matrix (embeds each side's translated text)
+    sim = similarity.similarity_matrix(
+        [r["translated"] for r in list1],
+        [r["translated"] for r in list2]
+    )
 
     # best counterpart in each direction
     best_j_for_i = sim.argmax(dim=1) # for each a1 paragraph, index of its best a2 paragraph
@@ -105,7 +55,7 @@ def analyze_articles(a1, a2):
         dict: section title -> {"agree": [...], "unique_a1": [...], "unique_a2": [...]}
     """
     analysis = {}
-    for title, a1_key, a2_key in _pair_sections(a1, a2):
+    for title, a1_key, a2_key in pair_sections(a1, a2):
         list1 = a1.get(a1_key, []) if a1_key else []
         list2 = a2.get(a2_key, []) if a2_key else []
         analysis[title] = _analyse_section(list1, list2)
