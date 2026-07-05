@@ -13,7 +13,12 @@
       <div class="subtitle">Merged and translated via Wikimerge (MVP)</div>
       <hr>
 
-      {# analysis is an ordered dict: section_title -> {agree, unique_a1, unique_a2} #}
+      {# a paragraph record: original subsections are flattened into their parent section
+         (see collect_paragraphs in article.py), so a record may carry the subsection
+         heading it came from (rec.heading) to keep it from reading as unlabeled rambling #}
+      {% macro para(rec) %}<p><span class="lang-tag">[{{ rec.lang }}]</span> {% if rec.heading %}<strong>{{ rec.heading }}:</strong> {% endif %}{{ rec.translated }}</p>{% endmacro %}
+
+      {# analysis is an ordered dict: section_title -> {agree, contradict, neutral, unique_a1, unique_a2} #}
       {% for section_title, info in analysis.items() %}
         <section class="section" id="{{ section_title|replace(' ', '_') }}">
           {% if section_title != 'Lead' %}
@@ -23,6 +28,8 @@
           {# small per-section count line #}
           <div class="counts" style="color:#54595d;font-size:0.85em;margin:4px 0;">
             {{ info.agree|length }} shared &middot;
+            {{ info.contradict|length }} contradicting &middot;
+            {{ info.neutral|length }} related &middot;
             {{ info.unique_a1|length }} only in {{ lang1 }} &middot;
             {{ info.unique_a2|length }} only in {{ lang2 }}
           </div>
@@ -31,17 +38,35 @@
           {% for pair in info.agree %}
             <div class="shared" style="border-left:3px solid #3366cc;background:#f6f9ff;padding:8px 12px;margin:8px 0;">
               <div style="font-size:0.8em;color:#3366cc;font-weight:bold;">Both editions:</div>
-              <p><span class="lang-tag">[{{ pair.a1.lang }}]</span> {{ pair.a1.translated }}</p>
-              <p><span class="lang-tag">[{{ pair.a2.lang }}]</span> {{ pair.a2.translated }}</p>
+              {{ para(pair.a1) }}
+              {{ para(pair.a2) }}
+            </div>
+          {% endfor %}
+
+          {# contradictions: same point, editions disagree on the facts #}
+          {% for pair in info.contradict %}
+            <div class="contradict" style="border-left:3px solid #d33;background:#fdf2f2;padding:8px 12px;margin:8px 0;">
+              <div style="font-size:0.8em;color:#d33;font-weight:bold;">Contradiction:</div>
+              {{ para(pair.a1) }}
+              {{ para(pair.a2) }}
+            </div>
+          {% endfor %}
+
+          {# neutral: topically related, but not the same claim -> shown together, not asserted as agreeing #}
+          {% for pair in info.neutral %}
+            <div class="neutral" style="border-left:3px solid #999;background:#f7f7f7;padding:8px 12px;margin:8px 0;">
+              <div style="font-size:0.8em;color:#666;font-weight:bold;">Related, not the same claim:</div>
+              {{ para(pair.a1) }}
+              {{ para(pair.a2) }}
             </div>
           {% endfor %}
 
           {# content only one edition has #}
           {% for rec in info.unique_a1 %}
-            <p><span class="lang-tag">[{{ rec.lang }}]</span> {{ rec.translated }}</p>
+            {{ para(rec) }}
           {% endfor %}
           {% for rec in info.unique_a2 %}
-            <p><span class="lang-tag">[{{ rec.lang }}]</span> {{ rec.translated }}</p>
+            {{ para(rec) }}
           {% endfor %}
         </section>
       {% endfor %}

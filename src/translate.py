@@ -193,13 +193,24 @@ def translate_article(article_dict, src_lang, translator):
 
     # prepare output with translated section keys (from section_map, so keys match the append loop below)
     out = {translated: [] for translated in section_map.values()}
-    
-    # build flat list
-    flat_list = [] # {"section": "...", "idx": ..., "text": "..."}
+
+    # build flat list (each paragraph also carries the subsection heading it came from,
+    # if any, per article.py's collect_paragraphs)
+    flat_list = [] # {"section": "...", "idx": ..., "text": "...", "heading": "..." or None}
     for section, paragraphs in article_dict.items():
-        for i, txt in enumerate(paragraphs):
-            flat_list.append({"section": section, "idx": i, "text": ("" if txt is None else str(txt))})
-    
+        for i, p in enumerate(paragraphs):
+            flat_list.append({
+                "section": section,
+                "idx": i,
+                "text": ("" if p["text"] is None else str(p["text"])),
+                "heading": p.get("heading")
+            })
+
+    # translate subsection headings too (deduplicated), so flattened paragraphs can
+    # still be labeled with the (translated) heading they came from
+    unique_headings = sorted({item["heading"] for item in flat_list if item["heading"]})
+    heading_map = dict(zip(unique_headings, translator.translate_batch(unique_headings, src_lang, "EN-GB"))) if unique_headings else {}
+
     # if flat_list is empty, return empty output
     if not flat_list:
         translator.save_cache() # persist any section-title translations done above
@@ -226,7 +237,8 @@ def translate_article(article_dict, src_lang, translator):
                 "lang": src_lang.upper(), # source language code
                 "original": item["text"], # original text
                 "translated": translated, # translated text
-                "idx": item["idx"] # original index in section
+                "idx": item["idx"], # original index in section
+                "heading": heading_map.get(item["heading"]) if item["heading"] else None # (translated) subsection heading, if any
             }
             # append to correct section (need to use section map to get translated section name!)
             out[section_map[item["section"]]].append(record)
@@ -237,7 +249,7 @@ def translate_article(article_dict, src_lang, translator):
     # persist cache so future runs can reuse these translations
     translator.save_cache()
 
-    # return translated article as dict[str, list[{"lang": "...", "original": "...", "translated": "..."}]]
+    # return translated article as dict[str, list[{"lang", "original", "translated", "idx", "heading"}]]
     return out
 
 # testing
@@ -259,12 +271,13 @@ if __name__ == "__main__":
         translator = DeepLTranslator()
         article = {
             "Introduction": [
-                "Hola mundo",
-                "Este es un artículo de prueba."
+                {"heading": None, "text": "Hola mundo"},
+                {"heading": None, "text": "Este es un artículo de prueba."}
             ],
             "Content": [
-                "La inteligencia artificial es un campo de estudio.",
-                "Que permite traducción automática que puede mejorar la comunicación."
+                {"heading": None, "text": "La inteligencia artificial es un campo de estudio."},
+                # tagged as if flattened from a subsection, to test heading translation
+                {"heading": "Traducción automática", "text": "Que permite traducción automática que puede mejorar la comunicación."}
             ]
         }
         translated_article = translate_article(article, "es", translator)
@@ -273,6 +286,8 @@ if __name__ == "__main__":
             for record in records:
                 print("  Original: " + record["original"])
                 print("  Translated: " + record["translated"])
+                if record["heading"]:
+                    print("  Heading: " + record["heading"])
     except Exception as e:
         print("Error:", e)
 

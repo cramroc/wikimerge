@@ -61,7 +61,8 @@ def render_html(title, analysis, outfile, lang1="", lang2=""):
 
 # testing
 if __name__ == "__main__":
-    # analysis-shaped demo: one shared point (both editions) + one unique per edition
+    # analysis-shaped demo: one shared point, one contradiction, one neutral pair,
+    # and one unique-per-edition section
     demo_analysis = {
         "Lead": {
             "agree": [{
@@ -69,12 +70,31 @@ if __name__ == "__main__":
                 "a2": {"lang": "FR", "translated": "Paris is the capital city of France."},
                 "score": 0.95
             }],
+            "contradict": [],
+            "neutral": [],
+            "unique_a1": [],
+            "unique_a2": []
+        },
+        "Population": {
+            "agree": [],
+            "contradict": [{
+                "a1": {"lang": "ES", "translated": "The city has a population of two million people."},
+                "a2": {"lang": "FR", "translated": "The city has a population of five million people."},
+                "score": 0.71
+            }],
+            "neutral": [{
+                "a1": {"lang": "ES", "translated": "The population grew rapidly after the war, driven by industrial jobs."},
+                "a2": {"lang": "FR", "translated": "The population is one of the most diverse in the region."},
+                "score": 0.58
+            }],
             "unique_a1": [],
             "unique_a2": []
         },
         "History": {
             "agree": [],
-            "unique_a1": [{"lang": "ES", "translated": "Founded in ancient times (from Spanish)."}],
+            "contradict": [],
+            "neutral": [],
+            "unique_a1": [{"lang": "ES", "heading": "Ancient period", "translated": "Founded in ancient times (from Spanish)."}],
             "unique_a2": [{"lang": "FR", "translated": "It also has many museums (from French)."}]
         }
     }

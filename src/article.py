@@ -61,7 +61,7 @@ def url_to_lang(url):
     lang_code = parsed_url.netloc.split('.')[0]
     return lang_code.lower() # return in lowercase for for wikipedia-api
 
-# function: get_article(lang: str, title: str) -> dict[str, list[str]]
+# function: get_article(lang: str, title: str) -> dict[str, list[dict]]  (each dict: {"heading", "text"})
 def get_article(lang, title):
     # instantiate wikipedia api
     wiki = wikipediaapi.Wikipedia(user_agent="Wikimerge/0.1 (https://github.com/cramroc/wikimerge)",
@@ -87,30 +87,37 @@ def get_article(lang, title):
         # return list of clean paragraphs
         return paragraphs
 
-    # helper function: collect_paragraphs(section) -> list[str]
-    # gather a section's own paragraphs AND all its subsections' (flattened, in reading order)
-    def collect_paragraphs(section):
-        # this section's own prose first
-        paragraphs = split_paragraphs(section.text)
-        # then recurse into each subsection (any depth) and append its paragraphs
+    # helper function: collect_paragraphs(section, heading=None) -> list[dict]
+    # gather a section's own paragraphs AND all its subsections' (flattened, in reading
+    # order). Each paragraph is tagged with the subsection heading it came from (None for
+    # the section's own prose) so the heading can still be shown as a label later, even
+    # though the subsections themselves are flattened away (e.g. "Estilos de boina" ->
+    # "Boina vasca" would otherwise vanish, leaving unlabeled paragraphs about a style
+    # that's never named in the prose itself).
+    def collect_paragraphs(section, heading=None):
+        # this section's own prose first, tagged with the heading it's nested under (if any)
+        paragraphs = [{"heading": heading, "text": p} for p in split_paragraphs(section.text)]
+        # then recurse into each subsection (any depth), tagging its prose with ITS OWN
+        # title (deepest subsection wins if nested further, which is the most specific label)
         for sub in section.sections:
-            paragraphs.extend(collect_paragraphs(sub))
+            paragraphs.extend(collect_paragraphs(sub, heading=sub.title))
         return paragraphs
 
     # build result dictionary
     ## initiate dict
     out = {}
-    ## introduction
-    lead_text = split_paragraphs(page.summary)
+    ## introduction (no subsections to tag, so no headings)
+    lead_text = [{"heading": None, "text": p} for p in split_paragraphs(page.summary)]
     if lead_text:
         out["Lead"] = lead_text
-    ## sections (each top-level section flattens in all of its subsection prose)
+    ## sections (each top-level section flattens in all of its subsection prose,
+    ## each paragraph tagged with the subsection it came from, if any)
     for s in page.sections:
         section_text = collect_paragraphs(s)
         if section_text:
             out[s.title] = section_text
 
-    # return result dictionary of section title & list of paragraphs in section
+    # return result dictionary: section title -> list of {"heading", "text"} records
     return out
 
 # test
@@ -127,7 +134,17 @@ if __name__ == "__main__":
         lead = data.get("Lead", [])
         print("\nLead (first 2 paragraphs):")
         for p in lead[:2]:
-            print("-", p, "\n")
-        
+            print("-", p["text"], "\n")
+
         print("Section names:")
         print(list(data.keys()))
+
+        # find a section that actually has subsection-tagged paragraphs, to sanity
+        # check the heading is being carried through
+        for title, paragraphs in data.items():
+            tagged = [p for p in paragraphs if p["heading"]]
+            if tagged:
+                print("\nExample subsection-tagged paragraph in '" + title + "':")
+                print("  heading: " + tagged[0]["heading"])
+                print("  text: " + tagged[0]["text"][:120])
+                break
