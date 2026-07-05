@@ -1,0 +1,28 @@
+name: CI
+
+# run the test suite on every push and every pull request
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: check out the repo
+        uses: actions/checkout@v4
+
+      - name: set up python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: run tests
+        # DEEPL_API_KEY is never real: test_translate.py's autouse fixture fakes it
+        # before constructing any translator, so no secret is needed here
+        run: python -m pytest -v
