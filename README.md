@@ -46,7 +46,7 @@ Python dependencies (pinned in `requirements.txt`):
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/carlosramroc/wikimerge.git
+git clone https://github.com/cramroc/wikimerge.git
 cd wikimerge
 
 # 2. Create and activate a virtual environment
