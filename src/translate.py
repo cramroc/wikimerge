@@ -159,6 +159,13 @@ class DeepLTranslator:
                 # JSON decoding error
                 raise RuntimeError("Error decoding DeepL API response")
 
+            # guard against a short response: without this, zip() below would stop early and leave some results[idx] as None
+            if len(translated_texts) != len(missing_texts):
+                raise RuntimeError(
+                    "DeepL API returned " + str(len(translated_texts)) +
+                    " translations for " + str(len(missing_texts)) + " requested texts"
+                )
+
             # slot each new translation back into its original position + save to cache
             for idx, translated in zip(missing_indices, translated_texts):
                 results[idx] = translated
@@ -186,16 +193,34 @@ def translate_article(article_dict, src_lang, translator):
     if not isinstance(article_dict, dict):
         raise ValueError("Article must be a dictionary of section -> list of paragraphs")
 
-    # translate section titles & make a mapping of old to new titles
+    # empty article: nothing to translate. Return early, otherwise translate_batch([]) below would raise ValueError before the flat_list guard could handle it.
+    if not article_dict:
+        return {}
+
+    # translate section titles & make a mapping of old to new titles.
+    # "Lead" is a synthetic English-only key inserted by article.py (never part of the
+    # source article), and downstream code (merge.py, the template) matches the literal
+    # string "Lead" - so exempt it from translation and re-insert it verbatim.
     section_names = list(article_dict.keys())
-    translated_section_names = translator.translate_batch(section_names, src_lang, "EN-GB")
-    section_map = dict(zip(section_names, translated_section_names)) # mapping original -> translated section names
+    non_lead_names = [s for s in section_names if s != "Lead"]
+    translated_non_lead = translator.translate_batch(non_lead_names, src_lang, "EN-GB") if non_lead_names else []
+
+    # build original -> translated mapping. If two source titles translate to the same
+    # string, suffix later ones with " (2)", " (3)", ... so their paragraphs stay in
+    # separate sections instead of silently merging under one key.
+    translated_counts = {}
+    section_map = {}
+    for orig, translated in zip(non_lead_names, translated_non_lead):
+        translated_counts[translated] = translated_counts.get(translated, 0) + 1
+        n = translated_counts[translated]
+        section_map[orig] = translated if n == 1 else translated + " (" + str(n) + ")"
+    if "Lead" in article_dict:
+        section_map["Lead"] = "Lead" # edge case: a translated title could in theory collide with the literal "Lead"
 
     # prepare output with translated section keys (from section_map, so keys match the append loop below)
     out = {translated: [] for translated in section_map.values()}
 
-    # build flat list (each paragraph also carries the subsection heading it came from,
-    # if any, per article.py's collect_paragraphs)
+    # build flat list (each paragraph also carries the subsection heading it came from, if any, per article.py's collect_paragraphs)
     flat_list = [] # {"section": "...", "idx": ..., "text": "...", "heading": "..." or None}
     for section, paragraphs in article_dict.items():
         for i, p in enumerate(paragraphs):
@@ -206,8 +231,7 @@ def translate_article(article_dict, src_lang, translator):
                 "heading": p.get("heading")
             })
 
-    # translate subsection headings too (deduplicated), so flattened paragraphs can
-    # still be labeled with the (translated) heading they came from
+    # translate subsection headings too (deduplicated), so flattened paragraphs can still be labeled with the (translated) heading they came from
     unique_headings = sorted({item["heading"] for item in flat_list if item["heading"]})
     heading_map = dict(zip(unique_headings, translator.translate_batch(unique_headings, src_lang, "EN-GB"))) if unique_headings else {}
 

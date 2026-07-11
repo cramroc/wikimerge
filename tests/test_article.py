@@ -24,6 +24,10 @@ def test_url_check_rejects_non_wikipedia_host():
     with pytest.raises(ValueError):
         url_check("https://example.com/wiki/Boina")
 
+def test_url_check_rejects_lookalike_host(): # "evilwikipedia.org" ends with "wikipedia.org" but is not a subdomain
+    with pytest.raises(ValueError):
+        url_check("https://evilwikipedia.org/wiki/Boina")
+
 def test_url_check_rejects_wrong_path():
     with pytest.raises(ValueError):
         url_check("https://es.wikipedia.org/notwiki/Boina")

@@ -15,8 +15,10 @@ def url_check(url):
     ## scheme must be http(s)
     if p.scheme not in ("http", "https"):
         raise ValueError("Scheme must be http or https")
-    ## host must be "wikipedia.org" or a subdomain
-    if not p.netloc.endswith("wikipedia.org"):
+    ## host must be "wikipedia.org" or a subdomain (dot-boundary check, so
+    ## "evilwikipedia.org" is rejected; p.hostname strips any port and lowercases)
+    host = p.hostname
+    if host != "wikipedia.org" and not (host or "").endswith(".wikipedia.org"):
         raise ValueError("Host must be wikipedia.org or a subdomain")
     ## path must begin with "/wiki/"
     if not p.path.startswith("/wiki/"):

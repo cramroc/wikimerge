@@ -42,7 +42,7 @@ def test_translate_text_happy_path(monkeypatch):
 
 def test_translate_text_uses_cache_on_second_call(monkeypatch):
     calls = []
-    def fake_post(endpoint, data, headers): # stands in for requests.post; check args and return a fake response
+    def fake_post(*args, data, **kwargs): # stands in for requests.post; check args and return a fake response
         calls.append(data)
         return FakeResponse(200, {"translations": [{"text": "Hello"}]})
     monkeypatch.setattr(translate.requests, "post", fake_post)
@@ -96,7 +96,7 @@ def test_translate_text_raises_runtime_error_on_connection_failure(monkeypatch):
 
 def test_translate_batch_only_requests_uncached_texts(monkeypatch):
     calls = []
-    def fake_post(endpoint, data, headers): # stands in for requests.post; check args and return a fake response
+    def fake_post(*args, data, **kwargs): # stands in for requests.post; check args and return a fake response
         calls.append(data["text"])
         return FakeResponse(200, {"translations": [{"text": "World"}]})
     monkeypatch.setattr(translate.requests, "post", fake_post)
@@ -119,6 +119,15 @@ def test_translate_batch_raises_when_all_whitespace():
     translator = translate.DeepLTranslator()
     with pytest.raises(ValueError): # DeepLTranslator.translate_batch should raise ValueError when all texts are whitespace-only
         translator.translate_batch(["  ", ""], "es", "EN-GB")
+
+def test_translate_batch_raises_when_response_shorter_than_request(monkeypatch):
+    # DeepL returns only one translation for two requested texts (a short/mismatched response)
+    def fake_post(*args, **kwargs): # stands in for requests.post; return a fake response with only one translation
+        return FakeResponse(200, {"translations": [{"text": "Hello"}]})
+    monkeypatch.setattr(translate.requests, "post", fake_post)
+    translator = translate.DeepLTranslator()
+    with pytest.raises(RuntimeError): # a response-length mismatch should raise, not silently leave a None translation
+        translator.translate_batch(["Hola", "Mundo"], "es", "EN-GB")
 
 # -- normalise_lang_code + _cache_key ---------------------------------------------
 
@@ -157,7 +166,7 @@ def test_translate_article_rejects_non_dict_input():
 
 def test_translate_article_tags_paragraphs_with_translated_headings(monkeypatch):
     # bypass real translate_batch entirely; just prefix each text so we can verify translate_article wires section titles, headings and paragraphs correctly
-    def fake_batch(self, texts, source_lang, target_lang): # stands in for DeepLTranslator.translate_batch; prefix each text with "EN:"
+    def fake_batch(self, texts, *args, **kwargs): # stands in for DeepLTranslator.translate_batch; prefix each text with "EN:"
         return ["EN:" + t for t in texts]
     monkeypatch.setattr(translate.DeepLTranslator, "translate_batch", fake_batch)
 
@@ -181,3 +190,49 @@ def test_translate_article_tags_paragraphs_with_translated_headings(monkeypatch)
     tagged = result["EN:Contenido"][1] # the subsection in the "Contenido" section
     assert tagged["translated"] == "EN:Texto de la subseccion" # the paragraph text is translated and prefixed with "EN:"
     assert tagged["heading"] == "EN:Subseccion" # the heading is translated and prefixed with "EN:"
+
+def test_translate_article_returns_empty_for_empty_article(monkeypatch):
+    def fail_if_called(*args, **kwargs): # translate API must never be called for an empty article
+        raise AssertionError("translate_batch should not be called for an empty article")
+    monkeypatch.setattr(translate.DeepLTranslator, "translate_batch", fail_if_called)
+
+    translator = translate.DeepLTranslator()
+    assert translate.translate_article({}, "es", translator) == {} # empty article translates to empty output, no API call
+
+def test_translate_article_exempts_lead_from_translation(monkeypatch):
+    seen_texts = [] # record every text passed to translate_batch, to prove "Lead" is never sent
+    def fake_batch(self, texts, *args, **kwargs): # stands in for translate_batch; prefix each text with "EN:"
+        seen_texts.extend(texts)
+        return ["EN:" + t for t in texts]
+    monkeypatch.setattr(translate.DeepLTranslator, "translate_batch", fake_batch)
+
+    translator = translate.DeepLTranslator()
+    article = {
+        "Lead": [{"heading": None, "text": "Resumen"}],
+        "Historia": [{"heading": None, "text": "Texto"}]
+    }
+    result = translate.translate_article(article, "es", translator)
+
+    assert "Lead" not in seen_texts # "Lead" must never be sent to DeepL
+    assert "Lead" in result # the Lead section survives under its literal, untranslated key
+    assert result["Lead"][0]["translated"] == "EN:Resumen" # its paragraphs are still translated normally
+    assert result["EN:Historia"][0]["translated"] == "EN:Texto" # a real section title is still translated
+
+def test_translate_article_keeps_colliding_translated_titles_distinct(monkeypatch):
+    # two different source titles that translate to the same English string must not merge
+    def fake_batch(self, texts, *args, **kwargs): # stands in for translate_batch; map both section titles to "Notes"
+        mapping = {"Notas": "Notes", "Apuntes": "Notes"}
+        return [mapping.get(t, t) for t in texts]
+    monkeypatch.setattr(translate.DeepLTranslator, "translate_batch", fake_batch)
+
+    translator = translate.DeepLTranslator()
+    article = {
+        "Notas": [{"heading": None, "text": "primera"}],
+        "Apuntes": [{"heading": None, "text": "segunda"}]
+    }
+    result = translate.translate_article(article, "es", translator)
+
+    assert "Notes" in result and "Notes (2)" in result # colliding titles get a numeric suffix instead of merging
+    assert len(result) == 2 # both sections survive as distinct keys
+    assert result["Notes"][0]["translated"] == "primera" # first section keeps its own paragraph
+    assert result["Notes (2)"][0]["translated"] == "segunda" # second section keeps its own paragraph
