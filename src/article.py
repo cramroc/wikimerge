@@ -15,8 +15,7 @@ def url_check(url):
     ## scheme must be http(s)
     if p.scheme not in ("http", "https"):
         raise ValueError("Scheme must be http or https")
-    ## host must be "wikipedia.org" or a subdomain (dot-boundary check, so
-    ## "evilwikipedia.org" is rejected; p.hostname strips any port and lowercases)
+    ## host must be "wikipedia.org" or a subdomain (dot-boundary check, so "evilwikipedia.org" is rejected; p.hostname strips any port and lowercases)
     host = p.hostname
     if host != "wikipedia.org" and not (host or "").endswith(".wikipedia.org"):
         raise ValueError("Host must be wikipedia.org or a subdomain")
@@ -90,17 +89,13 @@ def get_article(lang, title):
         return paragraphs
 
     # helper function: collect_paragraphs(section, heading=None) -> list[dict]
-    # gather a section's own paragraphs AND all its subsections' (flattened, in reading
-    # order). Each paragraph is tagged with the subsection heading it came from (None for
-    # the section's own prose) so the heading can still be shown as a label later, even
-    # though the subsections themselves are flattened away (e.g. "Estilos de boina" ->
-    # "Boina vasca" would otherwise vanish, leaving unlabeled paragraphs about a style
-    # that's never named in the prose itself).
+    # Gather a section's own paragraphs AND all its subsections' (flattened, in reading order).
+    # Each paragraph is tagged with the subsection heading it came from (None for the section's own prose).
+    # The headings can still be shown as a label later, even though the subsections themselves are flattened away
     def collect_paragraphs(section, heading=None):
         # this section's own prose first, tagged with the heading it's nested under (if any)
         paragraphs = [{"heading": heading, "text": p} for p in split_paragraphs(section.text)]
-        # then recurse into each subsection (any depth), tagging its prose with ITS OWN
-        # title (deepest subsection wins if nested further, which is the most specific label)
+        # then recurse into each subsection (any depth), tagging its prose with ITS OWN title (deepest subsection wins if nested further, which is the most specific label)
         for sub in section.sections:
             paragraphs.extend(collect_paragraphs(sub, heading=sub.title))
         return paragraphs
@@ -112,8 +107,7 @@ def get_article(lang, title):
     lead_text = [{"heading": None, "text": p} for p in split_paragraphs(page.summary)]
     if lead_text:
         out["Lead"] = lead_text
-    ## sections (each top-level section flattens in all of its subsection prose,
-    ## each paragraph tagged with the subsection it came from, if any)
+    ## sections (each top-level section flattens in all of its subsection prose, each paragraph tagged with the subsection it came from, if any)
     for s in page.sections:
         section_text = collect_paragraphs(s)
         if section_text:

@@ -266,19 +266,6 @@ def translate_article(article_dict, src_lang, translator):
         # (even if exception is raised partway through, cache is still saved).
         translator.save_cache()
 
-# testing
-"""
-if __name__ == "__main__":
-    # test paragraph translation
-    try:
-        translator = DeepLTranslator()
-        original = "Hola mundo"
-        translated = translator.translate_text(original, "es", "EN-GB")
-        print("Original:", original)
-        print("Translated:", translated)
-    except Exception as e:
-        print("Error:", e)
-"""
 if __name__ == "__main__":
     # test article translation
     try:
