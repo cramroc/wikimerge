@@ -187,76 +187,68 @@ def translate_paragraph(paragraph, src_lang, translator):
     # return translated paragraph as string
     return translator.translate_text(paragraph, src_lang, "EN-GB")
 
+# translate a list of texts in chunks of batch_size, (because DeepL free tier rejects requests with >50 texts).
+# Translations are returned in the same order as items; an empty list is returned untouched (no API call).
+def _translate_in_batches(items, src_lang, translator, batch_size=50):
+    out = []
+    pos = 0
+    while pos < len(items):
+        chunk = items[pos:pos+batch_size]
+        out.extend(translator.translate_batch(chunk, src_lang, "EN-GB")) # translate chunk and append to out
+        pos += batch_size
+    return out
+
 # function to translate article
 def translate_article(article_dict, src_lang, translator):
     # check inputs are valid types
     if not isinstance(article_dict, dict):
         raise ValueError("Article must be a dictionary of section -> list of paragraphs")
 
-    # empty article: nothing to translate. Return early, otherwise translate_batch([]) below would raise ValueError before the flat_list guard could handle it.
+    # empty article: nothing to translate or cache, so return early.
     if not article_dict:
         return {}
 
-    # translate section titles & make a mapping of old to new titles.
-    # "Lead" is a synthetic English-only key inserted by article.py (never part of the
-    # source article), and downstream code (merge.py, the template) matches the literal
-    # string "Lead" - so exempt it from translation and re-insert it verbatim.
-    section_names = list(article_dict.keys())
-    non_lead_names = [s for s in section_names if s != "Lead"]
-    translated_non_lead = translator.translate_batch(non_lead_names, src_lang, "EN-GB") if non_lead_names else []
+    # wrap all translation work in try/finally so cache is written exactly once, (whether run completes or a batch raises partway through).
+    try:
+        # translate section titles & make a mapping of old to new titles.
+        # "Lead" is a synthetic English-only key inserted by article.py an is used downstream, so exempt it from translation and re-insert it verbatim.
+        section_names = list(article_dict.keys())
+        non_lead_names = [s for s in section_names if s != "Lead"]
+        translated_non_lead = _translate_in_batches(non_lead_names, src_lang, translator)
 
-    # build original -> translated mapping. If two source titles translate to the same
-    # string, suffix later ones with " (2)", " (3)", ... so their paragraphs stay in
-    # separate sections instead of silently merging under one key.
-    translated_counts = {}
-    section_map = {}
-    for orig, translated in zip(non_lead_names, translated_non_lead):
-        translated_counts[translated] = translated_counts.get(translated, 0) + 1
-        n = translated_counts[translated]
-        section_map[orig] = translated if n == 1 else translated + " (" + str(n) + ")"
-    if "Lead" in article_dict:
-        section_map["Lead"] = "Lead" # edge case: a translated title could in theory collide with the literal "Lead"
+        # build original -> translated mapping. If two source titles translate to the same string
+        # suffix later ones with " (2)", " (3)", etc, so their paragraphs stay in separate sections instead of silently merging under one key.
+        translated_counts = {}
+        section_map = {}
+        for orig, translated in zip(non_lead_names, translated_non_lead):
+            translated_counts[translated] = translated_counts.get(translated, 0) + 1
+            n = translated_counts[translated]
+            section_map[orig] = translated if n == 1 else translated + " (" + str(n) + ")"
+        if "Lead" in article_dict:
+            section_map["Lead"] = "Lead" # edge case: a translated title could in theory collide with the literal "Lead"
 
-    # prepare output with translated section keys (from section_map, so keys match the append loop below)
-    out = {translated: [] for translated in section_map.values()}
+        # prepare output with translated section keys (from section_map, so keys match the append loop below)
+        out = {translated: [] for translated in section_map.values()}
 
-    # build flat list (each paragraph also carries the subsection heading it came from, if any, per article.py's collect_paragraphs)
-    flat_list = [] # {"section": "...", "idx": ..., "text": "...", "heading": "..." or None}
-    for section, paragraphs in article_dict.items():
-        for i, p in enumerate(paragraphs):
-            flat_list.append({
-                "section": section,
-                "idx": i,
-                "text": ("" if p["text"] is None else str(p["text"])),
-                "heading": p.get("heading")
-            })
+        # build flat list (each paragraph also carries the subsection heading it came from, if any, per article.py's collect_paragraphs)
+        flat_list = [] # {"section": "...", "idx": ..., "text": "...", "heading": "..." or None}
+        for section, paragraphs in article_dict.items():
+            for i, p in enumerate(paragraphs):
+                flat_list.append({
+                    "section": section,
+                    "idx": i,
+                    "text": ("" if p["text"] is None else str(p["text"])),
+                    "heading": p.get("heading")
+                })
 
-    # translate subsection headings too (deduplicated), so flattened paragraphs can still be labeled with the (translated) heading they came from
-    unique_headings = sorted({item["heading"] for item in flat_list if item["heading"]})
-    heading_map = dict(zip(unique_headings, translator.translate_batch(unique_headings, src_lang, "EN-GB"))) if unique_headings else {}
+        # translate subsection headings too (deduplicated), so flattened paragraphs can still be labeled with the (translated) heading they came from
+        unique_headings = sorted({item["heading"] for item in flat_list if item["heading"]})
+        heading_map = dict(zip(unique_headings, _translate_in_batches(unique_headings, src_lang, translator)))
 
-    # if flat_list is empty, return empty output
-    if not flat_list:
-        translator.save_cache() # persist any section-title translations done above
-        return out
-    
-    # chunk flat list into batches of 50 (DeepL free tier limit is 50 texts per request)
-    max_batch_size = 50
-    n = len(flat_list)
-    pos = 0
-
-    # loop through batches
-    while pos < n:
-        # define batch and extract texts
-        batch = flat_list[pos:pos+max_batch_size]
-        texts = [item["text"] for item in batch]
-
-        # one HTTP call for this batch
-        translated_texts = translator.translate_batch(texts, src_lang, "EN-GB")
-        
-        # zip translated texts with original items and append to correct section
-        for item, translated in zip(batch, translated_texts):
-            # create record
+        # translate every paragraph in one chunked pass
+        # (_translate_in_batches preserves input order, so a single zip back onto flat_list is safe even across chunk boundaries)
+        translated_texts = _translate_in_batches([item["text"] for item in flat_list], src_lang, translator)
+        for item, translated in zip(flat_list, translated_texts):
             record = {
                 "lang": src_lang.upper(), # source language code
                 "original": item["text"], # original text
@@ -266,15 +258,13 @@ def translate_article(article_dict, src_lang, translator):
             }
             # append to correct section (need to use section map to get translated section name!)
             out[section_map[item["section"]]].append(record)
-        
-        # move on to next batch
-        pos += max_batch_size
 
-    # persist cache so future runs can reuse these translations
-    translator.save_cache()
-
-    # return translated article as dict[str, list[{"lang", "original", "translated", "idx", "heading"}]]
-    return out
+        # return translated article as dict[str, list[{"lang", "original", "translated", "idx", "heading"}]]
+        return out
+    finally:
+        # persist cache so future runs can reuse these translations
+        # (even if exception is raised partway through, cache is still saved).
+        translator.save_cache()
 
 # testing
 """

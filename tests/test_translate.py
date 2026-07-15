@@ -236,3 +236,37 @@ def test_translate_article_keeps_colliding_translated_titles_distinct(monkeypatc
     assert len(result) == 2 # both sections survive as distinct keys
     assert result["Notes"][0]["translated"] == "primera" # first section keeps its own paragraph
     assert result["Notes (2)"][0]["translated"] == "segunda" # second section keeps its own paragraph
+
+def test_translate_article_chunks_paragraphs_to_deepl_batch_limit(monkeypatch):
+    # 120 paragraphs must be sent in several requests, each within DeepL's 50-text limit
+    batch_sizes = [] # length of every list handed to translate_batch, across all call sites
+    def fake_batch(self, texts, *args, **kwargs): # stands in for translate_batch; record the batch size and prefix each text
+        batch_sizes.append(len(texts))
+        return ["EN:" + t for t in texts]
+    monkeypatch.setattr(translate.DeepLTranslator, "translate_batch", fake_batch)
+
+    translator = translate.DeepLTranslator()
+    article = {"Contenido": [{"heading": None, "text": "p" + str(i)} for i in range(120)]}
+    result = translate.translate_article(article, "es", translator)
+    translations = [record["translated"] for record in result["EN:Contenido"]]
+
+    assert all(size <= 50 for size in batch_sizes) # no request ever exceeds the 50-text limit
+    assert sum(size for size in batch_sizes if size > 1) == 120 # every paragraph was sent exactly once
+    assert translations == ["EN:p" + str(i) for i in range(120)] # order is preserved across chunk boundaries
+
+def test_translate_article_saves_cache_even_when_a_batch_fails(monkeypatch):
+    saves = [] # records each save_cache call
+    monkeypatch.setattr(translate.DeepLTranslator, "save_cache", lambda self: saves.append(1))
+    calls = {"n": 0}
+    def flaky_batch(self, texts, *args, **kwargs): # stands in for translate_batch; fails on the second call (a paragraph chunk, after section titles)
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("network down mid-run")
+        return ["EN:" + t for t in texts]
+    monkeypatch.setattr(translate.DeepLTranslator, "translate_batch", flaky_batch)
+
+    translator = translate.DeepLTranslator()
+    article = {"Contenido": [{"heading": None, "text": "p" + str(i)} for i in range(60)]}
+    with pytest.raises(RuntimeError): # the failure still propagates to the caller
+        translate.translate_article(article, "es", translator)
+    assert saves == [1] # save_cache still ran exactly once (via "finally"), so earlier batches are not lost
