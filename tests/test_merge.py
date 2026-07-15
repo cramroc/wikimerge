@@ -1,7 +1,9 @@
 # tests for src/merge.py's pair_sections: title alignment + section ordering.
+
 # similarity.similarity_matrix is mocked to an exact-title-match stand-in for all
 # tests here, since the real embedding model is slow and non-deterministic to pin
 # down in a unit test -- that belongs to similarity.py's own tests, not this one.
+
 import torch
 import pytest
 from src import merge
@@ -54,3 +56,38 @@ def test_content_sections_ordered_by_fractional_position():
     a2 = {"Lead": [], "Range": [], "Habitat": []}
     titles_in_order = [title for title, _, _ in merge.pair_sections(a1, a2)]
     assert titles_in_order.index("Diet") < titles_in_order.index("Habitat") # Diet comes before Habitat (because it sits proportionally earlier in a1 than Habitat does in a2)
+
+def test_section_matching_is_mutual_best_not_greedy(monkeypatch):
+    # Test for asymmetric similarities that a greedy vs. mutual match would resolve differently
+    scores = {
+        ("Alpha", "X"): 0.90, ("Alpha", "Y"): 0.95,
+        ("Beta", "X"): 0.55, ("Beta", "Y"): 0.40,
+    }
+    def fake_similarity_matrix(texts_a, texts_b): # per-test override; defaults to 0.0 (so appendix matching sees no appendices)
+        return torch.tensor([[scores.get((a, b), 0.0) for b in texts_b] for a in texts_a])
+    monkeypatch.setattr(merge.similarity, "similarity_matrix", fake_similarity_matrix)
+
+    a1 = {"Alpha": [], "Beta": []}
+    a2 = {"X": [], "Y": []}
+    by_title = {title: (a1_key, a2_key) for title, a1_key, a2_key in merge.pair_sections(a1, a2)}
+    assert by_title["Alpha"] == ("Alpha", "Y") # mutual best match pairs Alpha with Y (0.95), not greedy's X (0.90)
+    assert by_title["X"] == (None, "X") # X is left unmatched, because Alpha (its best) preferred Y
+    assert by_title["Beta"] == ("Beta", None) # Beta's only candidate X is not its mutual best, so Beta stays unmatched
+
+def test_translated_appendix_title_is_pinned_last(monkeypatch):
+    # Test for non-English article's appendix heading translating inexactly to canonical appendix section headers in English.
+    # E.g.: "Einzelnachweise" (German) to "Individual evidence" -> map to English "references".
+    # Matching appendices by embedding similarity still recognises it and pins it last, after content sections.
+    scores = {
+        ("History", "History"): 1.0, # section matching: History aligns across the two articles
+        ("Individual evidence", "references"): 0.9, # appendix matching: recognised as an appendix
+    }
+    def fake_similarity_matrix(texts_a, texts_b): # per-test override; everything else defaults to 0.0
+        return torch.tensor([[scores.get((a, b), 0.0) for b in texts_b] for a in texts_a])
+    monkeypatch.setattr(merge.similarity, "similarity_matrix", fake_similarity_matrix)
+
+    a1 = {"Lead": [], "History": [], "Individual evidence": []}
+    a2 = {"Lead": [], "History": []}
+    titles_in_order = [title for title, _, _ in merge.pair_sections(a1, a2)]
+    assert titles_in_order[-1] == "Individual evidence" # matched to "references" by similarity, so pinned last
+    assert titles_in_order.index("History") < titles_in_order.index("Individual evidence") # after the content section

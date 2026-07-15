@@ -2,7 +2,7 @@ from src import similarity
 
 SECTION_MATCH_THRESHOLD = 0.5 # cosine threshold for treating two section titles as the same section (embedding similarity; tune on real runs)
 
-# trailing "appendix" sections (already translated to English) in canonical Wikipedia order;
+# trailing "appendix" sections (in English) in canonical Wikipedia order;
 # these are pulled out of the fractional ordering and always placed last, in this order
 APPENDIX_ORDER = [
     "see also",
@@ -19,41 +19,34 @@ APPENDIX_ORDER = [
     "external links",
     "related articles",
 ]
-APPENDIX_SECTIONS = set(APPENDIX_ORDER) # for fast membership checks
 
-def _best_section_match(title, candidate_titles, used):
-    """
-    Find the candidate section title most similar to `title` (by embedding cosine).
-    Input:
-        title (str): the section title we want to match
-        candidate_titles (list[str]): possible section titles to match against
-        used (set): candidate titles already matched (skipped, each used once)
-    Output:
-        str or None: best-matching title if it clears SECTION_MATCH_THRESHOLD, else None
-    """
+# decide, for each section title, if it is an "appendix" section.
+# if so -> decide where it ranks in the canonical order by matching against APPENDIX_ORDER.
+# Match by embedding similarity against APPENDIX_ORDER (so inexact translated variants are still recognised as appendix sections).
+#   Input:  titles (list[str]) -- the section titles to classify
+#   Output: dict title -> index into APPENDIX_ORDER of its closest canonical appendix name
+#           (that index doubles as the sort rank), or None if nothing clears the threshold
+#           (meaning "this is a normal content section, not an appendix")
+def _appendix_matches(titles):
+    # nothing to classify -> empty map (also avoids calling the model with an empty list)
+    if not titles:
+        return {}
 
-    # only consider candidates not already matched (each a1 section used once)
-    available = [c for c in candidate_titles if c not in used]
-    if not available:
-        return None
+    # sim[i][k] = cosine similarity between titles[i] and APPENDIX_ORDER[k].
+    sim = similarity.similarity_matrix(titles, APPENDIX_ORDER)
 
-    # cosine similarity of this title against each available candidate title
-    scores = similarity.similarity_matrix([title], available)[0]
+    # for each title (row i), find the column of its single most-similar appendix name
+    best_idx = sim.argmax(dim=1) # best_idx[i] = index k of the best appendix match for titles[i]
 
-    # pick the best-scoring candidate; only count it if it clears the threshold
-    best = int(scores.argmax())
-    if float(scores[best]) >= SECTION_MATCH_THRESHOLD:
-        return available[best]
-    return None
-
-def _is_appendix(title):
-    # is this a trailing "appendix" section (see also, references, external links, ...)?
-    return title.strip().lower() in APPENDIX_SECTIONS
-
-def _appendix_rank(title):
-    # position of an appendix title in the canonical order (unknown ones sort after known)
-    t = title.strip().lower()
-    return APPENDIX_ORDER.index(t) if t in APPENDIX_SECTIONS else len(APPENDIX_ORDER)
+    # keep that appendix index only if the match is strong enough; otherwise map to None (title is not an appendix)
+    return {
+        title: (
+            int(best_idx[i])
+            if float(sim[i][int(best_idx[i])]) >= SECTION_MATCH_THRESHOLD
+            else None
+        )
+        for i, title in enumerate(titles)
+    }
 
 def pair_sections(a1, a2):
     """
@@ -66,54 +59,60 @@ def pair_sections(a1, a2):
         References, External links, ...) always last in canonical order; a1_key / a2_key
         is the section name in that article, or None if only one article has it
     """
-    # non-Lead section titles for each article (Lead is handled on its own)
+    # non-Lead section titles for each article (Lead is handled on its own, always first)
     a1_sections = [s for s in a1.keys() if s != "Lead"]
     a2_sections = [s for s in a2.keys() if s != "Lead"]
 
-    # match each article-2 section to its most similar article-1 section (each a1 used once)
-    a2_to_a1 = {} # maps an a2 section title -> the a1 section it pairs with (or None)
-    claimed_a1 = set()
-    for a2_sec in a2_sections:
-        match = _best_section_match(a2_sec, a1_sections, claimed_a1)
-        a2_to_a1[a2_sec] = match
-        if match is not None:
-            claimed_a1.add(match)
+    # --- match sections across the two articles by title similarity using MUTUAL best match
 
-    # build the pairing (Lead, a1 sections with their match, then unmatched a2 sections)
+    a2_to_a1 = {a2_sec: None for a2_sec in a2_sections} # a2 section title -> the a1 title it pairs with (None = unmatched)
+    if a1_sections and a2_sections: # similarity_matrix needs both sides non-empty
+        sim = similarity.similarity_matrix(a1_sections, a2_sections)
+        best_j_for_i = sim.argmax(dim=1) # best_j_for_i[i] = index of the a2 section most similar to a1 section i
+        best_i_for_j = sim.argmax(dim=0) # best_i_for_j[j] = index of the a1 section most similar to a2 section j
+        for i in range(len(a1_sections)):
+            j = int(best_j_for_i[i]) # a1 section i's favourite a2 section is j
+            # pair them only if a2 section j's favourite is also a1 section i (mutual)
+            # AND if the similarity is high enough
+            if int(best_i_for_j[j]) == i and float(sim[i][j]) >= SECTION_MATCH_THRESHOLD:
+                a2_to_a1[a2_sections[j]] = a1_sections[i]
+
+    # invert the mapping so we can look up "which a2 section did this a1 section pair with?" directly
+    a1_to_a2 = {a1_sec: a2_sec for a2_sec, a1_sec in a2_to_a1.items() if a1_sec is not None}
+
+    # --- assemble the list of (title, a1_key, a2_key) pairs
     pairs = []
+    # Lead always comes first
     if "Lead" in a1 or "Lead" in a2:
         pairs.append(("Lead", "Lead" if "Lead" in a1 else None, "Lead" if "Lead" in a2 else None))
+    # every a1 section, tagged with the a2 section it matched (or None if it matched nothing)
     for a1_sec in a1_sections:
-        matched_a2 = None
-        for a2_sec, target in a2_to_a1.items():
-            if target == a1_sec:
-                matched_a2 = a2_sec
-                break
-        pairs.append((a1_sec, a1_sec, matched_a2))
+        pairs.append((a1_sec, a1_sec, a1_to_a2.get(a1_sec)))
+    # a2 sections that matched no a1 section appear on their own (a1_key = None)
     for a2_sec in a2_sections:
         if a2_to_a1[a2_sec] is None:
             pairs.append((a2_sec, None, a2_sec))
 
-    # order sections by their average FRACTIONAL position in the source articles, so
-    # appendices (See also / References / etc.) sort last. Normalising each index by the
-    # article's section count makes position comparable across articles of different
-    # lengths (0.0 = start, 1.0 = end) — which raw absolute indices don't.
-    a1_index = {title: i for i, title in enumerate(a1.keys())}
-    a2_index = {title: i for i, title in enumerate(a2.keys())}
+    # --- ordering: content by fractional position, appendices pinned last
+    a1_index = {title: i for i, title in enumerate(a1.keys())} # section title -> its absolute position in a1
+    a2_index = {title: i for i, title in enumerate(a2.keys())} # section title -> its absolute position in a2
     def position(pair):
         _, a1_key, a2_key = pair
         fracs = []
         if a1_key is not None:
-            fracs.append(a1_index[a1_key] / max(len(a1) - 1, 1)) # 0.0 = first, 1.0 = last
+            fracs.append(a1_index[a1_key] / max(len(a1) - 1, 1)) # this section's fractional position within a1
         if a2_key is not None:
-            fracs.append(a2_index[a2_key] / max(len(a2) - 1, 1))
+            fracs.append(a2_index[a2_key] / max(len(a2) - 1, 1)) # this section's fractional position within a2
         return sum(fracs) / len(fracs) # average across the editions that have this section
 
-    # split appendix sections out: content is ordered by fractional position, then the
-    # appendices always follow, in canonical Wikipedia order (regardless of position)
-    content = [p for p in pairs if not _is_appendix(p[0])]
-    appendix = [p for p in pairs if _is_appendix(p[0])]
-    content.sort(key=position)
-    appendix.sort(key=lambda p: _appendix_rank(p[0]))
+    # find sections which are appendices
+    appendix_matches = _appendix_matches([p[0] for p in pairs]) # title -> canonical appendix rank, or None
+    
+    # split into content vs appendix sections, then sort each group
+    content = [p for p in pairs if appendix_matches[p[0]] is None]
+    appendix = [p for p in pairs if appendix_matches[p[0]] is not None]
+    content.sort(key=position) # fractional position order
+    appendix.sort(key=lambda p: appendix_matches[p[0]]) # canonical appendix order
 
+    # content first (Lead sorts to the front because its fractional position is 0.0), appendices last
     return content + appendix

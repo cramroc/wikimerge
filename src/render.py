@@ -11,19 +11,31 @@ OUTPUT_DIR = os.path.join(BASE_DIR, "output")
 # define default output file name
 DEFAULT_OUTPUT_FILE = os.path.join(OUTPUT_DIR, "merged_article.html")
 
-# function to resolve outfile situations
+# function to resolve outfile situations: the file must end up inside OUTPUT_DIR
 def resolve_output_path(outfile):
     # if empty: default location
     if not outfile:
         return DEFAULT_OUTPUT_FILE
-    
-    # if user gives absolute path: respect it
+
+    # an absolute path is only respected if it actually lives inside OUTPUT_DIR
     if os.path.isabs(outfile):
-        return outfile
-    
-    # otherwise, treat as relative to OUTPUT_DIR
-    filename = os.path.basename(outfile)
-    return os.path.join(OUTPUT_DIR, filename)
+        # normalise both paths (resolve "..", unify separators/case) so the comparison is
+        # not fooled by e.g. "output/../secret" or casing differences on Windows
+        resolved = os.path.normcase(os.path.normpath(outfile))
+        output_dir_resolved = os.path.normcase(os.path.normpath(OUTPUT_DIR))
+        try:
+            # the path is confined iff OUTPUT_DIR is the common ancestor of the two
+            confined = os.path.commonpath([resolved, output_dir_resolved]) == output_dir_resolved
+        except ValueError:
+            # commonpath raises if the paths are on different drives (Windows) -> not confined
+            confined = False
+        if confined:
+            return outfile
+        # absolute but outside OUTPUT_DIR: fall back to just its filename inside OUTPUT_DIR
+        return os.path.join(OUTPUT_DIR, os.path.basename(resolved))
+
+    # a relative path is sandboxed to its bare filename inside OUTPUT_DIR (drop any dirs)
+    return os.path.join(OUTPUT_DIR, os.path.basename(outfile))
 
 # function: render_html(title, analysis, outfile, lang1="", lang2="") -> None
 def render_html(title, analysis, outfile, lang1="", lang2=""):
