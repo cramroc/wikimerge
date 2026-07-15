@@ -171,6 +171,8 @@ This is a personal project and isn't open to external contributions right now. A
 
 ## License
 
-No license has been chosen for this project yet. **Until a license is added, the code is "all rights reserved" by default — others cannot legally reuse it.** Adding a permissive license such as [MIT](https://choosealicense.com/licenses/mit/) is recommended if you want the project to be reusable.
+The **code** in this project is licensed under the [MIT License](LICENSE) — © 2026 cramroc. You may reuse, modify, and distribute it provided the copyright notice and license text are retained.
 
-**A note on Wikipedia content:** Articles fetched from Wikipedia are licensed under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). Any merged page WikiMerge produces is a derivative work of that content, so if you publish or distribute the output you must comply with CC BY-SA's attribution and share-alike requirements (credit the source articles and license the result under the same terms). The translations are produced by DeepL and subject to its terms of service.
+**A note on Wikipedia content:** Articles fetched from Wikipedia are licensed under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). Any merged page WikiMerge produces is a derivative work of that content, so if you publish or distribute the output you must comply with CC BY-SA's attribution and share-alike requirements: credit the source articles (with links), note that the text was machine-translated (a modification), and license the result under CC BY-SA 4.0. The MIT license above covers WikiMerge's own source code, not the Wikipedia-derived content it produces.
+
+**Translations:** English translations are produced by the [DeepL API](https://www.deepl.com/) and are subject to DeepL's terms of service.
